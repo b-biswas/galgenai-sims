@@ -149,13 +149,14 @@ def test_simulate_good_galaxy():
     galaxy_row = good_galaxies[0]
     filter_names = ["g", "r", "i", "z", "y"]
 
-    images_dict, pixel_variance_dict, galaxy_params = (
+    images_dict, pixel_variance_dict, noiseless_dict, galaxy_params = (
         sim.generate_image_from_row(galaxy_row, filter_names=filter_names)
     )
 
     # Verify outputs
     assert len(images_dict) == 5, "Should have 5 bands"
     assert len(pixel_variance_dict) == 5, "Should have 5 variance maps"
+    assert len(noiseless_dict) == 5, "Should have 5 noiseless images"
     assert len(galaxy_params) == 5, "Should have 5 parameter sets"
 
     for band in filter_names:
@@ -165,11 +166,17 @@ def test_simulate_good_galaxy():
         assert pixel_variance_dict[band].shape == (17, 17), (
             "Variance shape should be (17, 17)"
         )
+        assert noiseless_dict[band].shape == (17, 17), (
+            "Noiseless image shape should be (17, 17)"
+        )
         assert np.sum(images_dict[band]) > 0, (
             f"Band {band} should have positive flux"
         )
         assert np.all(pixel_variance_dict[band] >= 0), (
             "Variance should be non-negative"
+        )
+        assert np.sum(noiseless_dict[band]) > 0, (
+            f"Band {band} noiseless should have positive flux"
         )
 
 

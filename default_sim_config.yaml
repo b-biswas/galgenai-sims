@@ -1,9 +1,11 @@
 # Default simulation configuration for galgenai-sims
-# Copy this file to your working directory as sim_config.yaml and modify as needed
+# This config contains ONLY parameters needed to generate simulated FITS files
+# Training-related parameters (normalization, invert_mask, data splitting, etc.)
+# belong in the main galgenai_config.yaml in the GalGenAi repository
 
 cosmos:
   # Path to the COSMOSWeb FITS catalog (must be downloaded separately)
-  catalog_path: cosmos_data/test_catalog_30objects.fits
+  catalog_path: data/test_catalog_30objects.fits
 
   # Output directory for generated FITS dataset
   hf_dataset_path: data/hsc_simulated
