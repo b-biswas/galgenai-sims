@@ -1,0 +1,44 @@
+[project]
+name = "galgenai-sims"
+version = "0.1.0"
+description = "Galaxy simulation tools for GalGenAI"
+readme = "README.md"
+authors = [
+    { name = "Biswajit Biswas", email = "bbiswas@anl.gov" }
+]
+requires-python = ">=3.9"
+dependencies = [
+    "galsim>=2.4.0",
+    "astropy>=5.0",
+    "numpy>=1.21",
+    "pandas>=1.3",
+    "datasets>=2.0",
+    "pyyaml>=6.0",
+    "tqdm>=4.62",
+    "surveycodex",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.14.0",
+]
+
+[project.scripts]
+generate-fits-dataset = "galgenai_sims.scripts.generate_fits_dataset:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 79
+
+[tool.ruff.lint]
+select = ["E", "F", "B", "W"]
+
+[tool.ruff.lint.pycodestyle]
+max-doc-length = 72
+
+[tool.ruff.format]
+docstring-code-format = true

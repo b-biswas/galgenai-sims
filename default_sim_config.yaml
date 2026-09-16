@@ -1,0 +1,52 @@
+# Default simulation configuration for galgenai-sims
+# Copy this file to your working directory as sim_config.yaml and modify as needed
+
+cosmos:
+  # Path to the COSMOSWeb FITS catalog (must be downloaded separately)
+  catalog_path: cosmos_data/test_catalog_30objects.fits
+
+  # Output directory for generated FITS dataset
+  hf_dataset_path: data/hsc_simulated
+
+  # SNR threshold for filtering galaxies (HST F814W band)
+  HST_snr_threshold: 50
+
+  # Image size in pixels (square images)
+  image_size: 75
+
+  # Maximum number of galaxies to simulate (set to null for all)
+  max_galaxies: 10000
+
+  # Number of parallel workers for simulation
+  num_workers: 8
+
+  # Random seed for reproducibility
+  seed: 42
+
+  # Maximum FFT size for GalSim (controls memory usage)
+  max_fft_size: 512
+
+  # Mapping of catalog column names
+  catalog_columns:
+    # Magnitude columns (list of band names)
+    mag_cols:
+      - mag_model_hsc-g
+      - mag_model_hsc-r
+      - mag_model_hsc-i
+      - mag_model_hsc-z
+      - mag_model_hsc-y
+
+    # Morphology columns
+    hlr: radius_sersic          # Half-light radius column
+    sersic_n: sersic            # Sersic index column
+    sersic_ratio: axratio_sersic  # Axis ratio (b/a) column
+    sersic_angle: angle_sersic  # Position angle column
+
+    # Position columns
+    ra: ra
+    dec: dec
+
+    # Other columns
+    redshift_col: zfinal        # Redshift column
+    galid: id                   # Galaxy ID column
+    snr: snr_hst-f814w          # SNR column for filtering
