@@ -99,7 +99,7 @@ def load_fits_dataset(
                 if mag_col in metadata.columns:
                     # Filter out rows where magnitude equals
                     # sentinel value
-                    col_mask = metadata[mag_col] <= mag_sentinel
+                    col_mask = metadata[mag_col] != mag_sentinel
                     mask &= col_mask
 
             metadata = metadata[mask].reset_index(drop=True)

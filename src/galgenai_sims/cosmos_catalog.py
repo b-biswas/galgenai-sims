@@ -23,6 +23,7 @@ class COSMOSWebCatalog:
         galaxies_only=True,
         filter_invalid_mags=False,
         mag_sentinel=999.0,
+        use_bulge_disk=False,
     ):
         """
         Initialize the catalog
@@ -52,6 +53,9 @@ class COSMOSWebCatalog:
         mag_sentinel : float, optional
             Sentinel value indicating missing magnitude data
             (default: 999.0)
+        use_bulge_disk : bool, optional
+            If True, load bulge+disk decomposition from HDU 6 instead
+            of single Sersic profiles from HDU 1+2 (default: False)
         """
         if catalog_path is None:
             # Try config file first
@@ -72,26 +76,58 @@ class COSMOSWebCatalog:
         )
         self.filter_invalid_mags = filter_invalid_mags
         self.mag_sentinel = mag_sentinel
+        self.use_bulge_disk = use_bulge_disk
         if required_columns_only:
             if required_columns is None:
-                required_columns = [
-                    "id",
-                    "ra",
-                    "dec",
-                    "snr_hst-f814w",
-                    "mag_model_hsc-g",
-                    "mag_model_hsc-r",
-                    "mag_model_hsc-i",
-                    "mag_model_hsc-z",
-                    "mag_model_hsc-y",
-                    "radius_sersic",
-                    "sersic",
-                    "axratio_sersic",
-                    "angle_sersic",
-                    "zfinal",
-                    "type",
-                    "warn_flag",
-                ]
+                if use_bulge_disk:
+                    # Bulge+disk decomposition columns from B+D HDU
+                    required_columns = [
+                        # Filtering columns from photometry and redshift HDUs
+                        "id",  # From photometry HDU
+                        "ra",  # From photometry HDU
+                        "dec",  # From photometry HDU
+                        "snr_hst-f814w",  # From photometry HDU
+                        "warn_flag",  # From redshift/LEPHARE HDU
+                        "type",  # From redshift/LEPHARE HDU
+                        "zfinal",  # From redshift/LEPHARE HDU
+                        # B+D morphology columns from B+D HDU
+                        "disk_radius_deg",
+                        "bulge_radius_deg",
+                        "disk_axratio",
+                        "bulge_axratio",
+                        "angle_bd",
+                        # B+D magnitude columns from B+D HDU
+                        "mag_model_bulge_hsc-g",
+                        "mag_model_bulge_hsc-r",
+                        "mag_model_bulge_hsc-i",
+                        "mag_model_bulge_hsc-z",
+                        "mag_model_bulge_hsc-y",
+                        "mag_model_disk_hsc-g",
+                        "mag_model_disk_hsc-r",
+                        "mag_model_disk_hsc-i",
+                        "mag_model_disk_hsc-z",
+                        "mag_model_disk_hsc-y",
+                    ]
+                else:
+                    # Single Sersic profile columns from photometry HDU
+                    required_columns = [
+                        "id",
+                        "ra",
+                        "dec",
+                        "snr_hst-f814w",
+                        "mag_model_hsc-g",
+                        "mag_model_hsc-r",
+                        "mag_model_hsc-i",
+                        "mag_model_hsc-z",
+                        "mag_model_hsc-y",
+                        "radius_sersic",
+                        "sersic",
+                        "axratio_sersic",
+                        "angle_sersic",
+                        "zfinal",
+                        "type",
+                        "warn_flag",
+                    ]
 
         self.load_catalog(
             required_columns=required_columns,
@@ -100,30 +136,69 @@ class COSMOSWebCatalog:
 
     def load_catalog(self, required_columns=None, required_columns_only=False):
         with fits.open(self.catalog_path) as hdul:
-            fitsdata_photoetry = hdul[1].data
-            fitsdata_redshift = hdul[2].data
-            if required_columns_only:
-                photometry_cols = [
-                    col
-                    for col in required_columns
-                    if col in fitsdata_photoetry.names
-                ]
-                redshift_cols = [
-                    col
-                    for col in required_columns
-                    if col in fitsdata_redshift.names
-                ]
-                photometry = Table(
-                    {col: fitsdata_photoetry[col] for col in photometry_cols}
-                )
-                redshift = Table(
-                    {col: fitsdata_redshift[col] for col in redshift_cols}
-                )
-            else:
-                photometry = Table(fitsdata_photoetry)
-                redshift = Table(fitsdata_redshift)
+            if self.use_bulge_disk:
+                # Load bulge+disk decomposition from HDU 6
+                # Also load photometry HDU 1 for filtering columns
+                fitsdata_bd = hdul[6].data
+                fitsdata_photometry = hdul[1].data
+                fitsdata_redshift = hdul[2].data
 
-        self.data = hstack([photometry, redshift])
+                if required_columns_only:
+                    # Dynamically determine which columns are in each HDU
+                    bd_cols = [
+                        col
+                        for col in required_columns
+                        if col in fitsdata_bd.names
+                    ]
+                    photometry_cols = [
+                        col
+                        for col in required_columns
+                        if col in fitsdata_photometry.names and col not in fitsdata_bd.names
+                    ]
+                    redshift_cols = [
+                        col
+                        for col in required_columns
+                        if col in fitsdata_redshift.names and col not in fitsdata_photometry.names and col not in fitsdata_bd.names
+                    ]
+
+                    tables_to_stack = []
+                    if photometry_cols:
+                        tables_to_stack.append(Table({col: fitsdata_photometry[col] for col in photometry_cols}))
+                    if bd_cols:
+                        tables_to_stack.append(Table({col: fitsdata_bd[col] for col in bd_cols}))
+                    if redshift_cols:
+                        tables_to_stack.append(Table({col: fitsdata_redshift[col] for col in redshift_cols}))
+                else:
+                    tables_to_stack = [Table(fitsdata_photometry), Table(fitsdata_bd), Table(fitsdata_redshift)]
+
+                self.data = hstack(tables_to_stack)
+            else:
+                # Load single Sersic profiles from HDU 1 + 2
+                fitsdata_photoetry = hdul[1].data
+                fitsdata_redshift = hdul[2].data
+                if required_columns_only:
+                    photometry_cols = [
+                        col
+                        for col in required_columns
+                        if col in fitsdata_photoetry.names
+                    ]
+                    redshift_cols = [
+                        col
+                        for col in required_columns
+                        if col in fitsdata_redshift.names
+                    ]
+                    photometry = Table(
+                        {col: fitsdata_photoetry[col] for col in photometry_cols}
+                    )
+                    redshift = Table(
+                        {col: fitsdata_redshift[col] for col in redshift_cols}
+                    )
+                else:
+                    photometry = Table(fitsdata_photoetry)
+                    redshift = Table(fitsdata_redshift)
+
+                self.data = hstack([photometry, redshift])
+
         initial_count = len(self.data)
 
         if self.warn_flag_cut is not None:
