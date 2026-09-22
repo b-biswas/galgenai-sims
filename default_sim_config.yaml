@@ -14,7 +14,7 @@ cosmos:
   HST_snr_threshold: 50
 
   # Image size in pixels (square images)
-  image_size: 75
+  image_size: 32
 
   # Maximum number of galaxies to simulate (set to null for all)
   max_galaxies: 10000
@@ -26,7 +26,15 @@ cosmos:
   seed: 42
 
   # Maximum FFT size for GalSim (controls memory usage)
-  max_fft_size: 512
+  max_fft_size: 1024
+
+  # Galaxy model type: 'sersic' or 'bulge+disk'
+  galaxy_type: bulge+disk
+
+  # Bulge+Disk mode: Disk magnitude threshold for clipping
+  # If disk magnitude >= this value, clip to threshold and simulate bulge-only
+  # This handles sentinel values (e.g., 1e308) for galaxies with no detectable disk
+  disk_mag_threshold: 50.0
 
   # Mapping of catalog column names
   catalog_columns:
@@ -38,11 +46,35 @@ cosmos:
       - mag_model_hsc-z
       - mag_model_hsc-y
 
-    # Morphology columns
+    # Morphology columns (for single Sersic profile)
     hlr: radius_sersic          # Half-light radius column
     sersic_n: sersic            # Sersic index column
     sersic_ratio: axratio_sersic  # Axis ratio (b/a) column
     sersic_angle: angle_sersic  # Position angle column
+
+    # Bulge+Disk morphology columns (only used if galaxy_type: 'bulge+disk')
+    # Note: Requires loading from B+D HDU (HDU 6) in COSMOSWeb catalog
+    # Bulge magnitude columns (list of band names, same order as mag_cols)
+    mag_bulge_cols:
+      - mag_model_bulge_hsc-g
+      - mag_model_bulge_hsc-r
+      - mag_model_bulge_hsc-i
+      - mag_model_bulge_hsc-z
+      - mag_model_bulge_hsc-y
+
+    # Disk magnitude columns (list of band names, same order as mag_cols)
+    mag_disk_cols:
+      - mag_model_disk_hsc-g
+      - mag_model_disk_hsc-r
+      - mag_model_disk_hsc-i
+      - mag_model_disk_hsc-z
+      - mag_model_disk_hsc-y
+
+    radius_bulge: bulge_radius_deg  # Bulge half-light radius in degrees
+    radius_disk: disk_radius_deg    # Disk half-light radius in degrees
+    bulge_axratio: bulge_axratio    # Bulge axis ratio (b/a) column
+    disk_axratio: disk_axratio      # Disk axis ratio (b/a) column
+    angle_bd: angle_bd              # Position angle for both bulge and disk
 
     # Position columns
     ra: ra
