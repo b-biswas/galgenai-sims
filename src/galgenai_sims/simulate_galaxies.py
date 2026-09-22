@@ -55,6 +55,84 @@ def sim_single_band_sersic_galaxy(
     return gal
 
 
+def sim_single_band_bulge_disk_galaxy(
+    flux_bulge,
+    flux_disk,
+    hlr_bulge,
+    hlr_disk,
+    bulge_axratio,
+    disk_axratio,
+    position_angle,
+    gsparams=None,
+):
+    """
+    Create bulge+disk galaxy light profile from catalog parameters
+
+    The disk is modeled as an Exponential profile (Sersic n=1).
+    The bulge is modeled as a DeVaucouleurs profile (Sersic n=4).
+
+    If flux_disk is 0, simulates bulge-only galaxy (no disk component).
+
+    Parameters:
+    -----------
+    flux_bulge : float
+        Bulge flux in photons
+    flux_disk : float
+        Disk flux in photons (set to 0 for bulge-only)
+    hlr_bulge : float
+        Bulge half-light radius in arcsec
+    hlr_disk : float
+        Disk half-light radius in arcsec
+    bulge_axratio : float
+        Bulge axis ratio (b/a)
+    disk_axratio : float
+        Disk axis ratio (b/a)
+    position_angle : float
+        Position angle in degrees (applied to combined bulge+disk)
+    gsparams : galsim.GSParams, optional
+        GSParams object for FFT settings
+
+    Returns:
+    --------
+    galsim.GSObject
+        Combined bulge+disk galaxy profile (or bulge-only if flux_disk=0)
+    """
+    # Create bulge (DeVaucouleurs profile, Sersic n=4)
+    bulge = galsim.DeVaucouleurs(
+        half_light_radius=hlr_bulge, flux=flux_bulge, gsparams=gsparams
+    )
+
+    # Apply ellipticity to bulge
+    # Clip axis ratio to valid range [0, 1] to handle catalog edge cases
+    q_bulge = np.clip(bulge_axratio, 0.0, 1.0)
+    g_bulge = (1.0 - q_bulge) / (1.0 + q_bulge)
+    bulge = bulge.shear(g=g_bulge, beta=0.0 * galsim.degrees)
+
+    # Check if we have a disk component
+    if flux_disk > 0:
+        # Create disk component (Exponential profile, Sersic n=1)
+        disk = galsim.Exponential(
+            half_light_radius=hlr_disk, flux=flux_disk, gsparams=gsparams
+        )
+
+        # Apply ellipticity to disk
+        # Clip axis ratio to valid range [0, 1] to handle catalog edge cases
+        q_disk = np.clip(disk_axratio, 0.0, 1.0)
+        g_disk = (1.0 - q_disk) / (1.0 + q_disk)
+        disk = disk.shear(g=g_disk, beta=0.0 * galsim.degrees)
+
+        # Combine bulge and disk
+        gal = galsim.Add([bulge, disk])
+    else:
+        # Bulge-only galaxy
+        gal = bulge
+
+    # Rotate by position angle
+    gal = gal.rotate(position_angle * galsim.degrees)
+
+    return gal
+
+
 def _save_galaxy_fits(
     image_array, var_array, noiseless_array, path, filter_names
 ):
@@ -202,36 +280,62 @@ def _process_chunk(
             # same across all filters)
             first_filter_params = galaxy_params[filter_names[0]]
 
-            metadata_rows.append(
-                {
-                    "filename": filename,
-                    catalog_columns["galid"]: galaxy_id,
-                    catalog_columns["ra"]: float(gr[catalog_columns["ra"]]),
-                    catalog_columns["dec"]: float(gr[catalog_columns["dec"]]),
-                    catalog_columns["snr"]: float(gr[catalog_columns["snr"]]),
-                    **{
-                        next(
-                            col
-                            for col in catalog_columns["mag_cols"]
-                            if col.endswith(b)
-                        ): galaxy_params[b]["mag"]
-                        for b in filter_names
-                    },
+            # Build metadata dict based on galaxy type
+            metadata_dict = {
+                "filename": filename,
+                catalog_columns["galid"]: galaxy_id,
+                catalog_columns["ra"]: float(gr[catalog_columns["ra"]]),
+                catalog_columns["dec"]: float(gr[catalog_columns["dec"]]),
+                catalog_columns["snr"]: float(gr[catalog_columns["snr"]]),
+                catalog_columns["redshift_col"]: float(
+                    gr[catalog_columns["redshift_col"]]
+                ),
+            }
+
+            # Add magnitude and morphology columns based on galaxy type
+            if sim.galaxy_type == "sersic":
+                # Single Sersic profile: save total magnitudes and Sersic params
+                metadata_dict.update({
+                    next(
+                        col
+                        for col in catalog_columns["mag_cols"]
+                        if col.endswith(b)
+                    ): galaxy_params[b]["mag"]
+                    for b in filter_names
+                })
+                metadata_dict.update({
                     catalog_columns["hlr"]: first_filter_params["hlr"],
-                    catalog_columns["sersic_n"]: first_filter_params[
-                        "sersic_n"
-                    ],
-                    catalog_columns["sersic_ratio"]: first_filter_params[
-                        "sersic_ratio"
-                    ],
-                    catalog_columns["sersic_angle"]: first_filter_params[
-                        "sersic_angle"
-                    ],
-                    catalog_columns["redshift_col"]: float(
-                        gr[catalog_columns["redshift_col"]]
-                    ),
-                }
-            )
+                    catalog_columns["sersic_n"]: first_filter_params["sersic_n"],
+                    catalog_columns["sersic_ratio"]: first_filter_params["sersic_ratio"],
+                    catalog_columns["sersic_angle"]: first_filter_params["sersic_angle"],
+                })
+            elif sim.galaxy_type == "bulge+disk":
+                # Bulge+disk: save separate bulge and disk magnitudes and params
+                metadata_dict.update({
+                    next(
+                        col
+                        for col in catalog_columns["mag_bulge_cols"]
+                        if col.endswith(b)
+                    ): galaxy_params[b]["mag_bulge"]
+                    for b in filter_names
+                })
+                metadata_dict.update({
+                    next(
+                        col
+                        for col in catalog_columns["mag_disk_cols"]
+                        if col.endswith(b)
+                    ): galaxy_params[b]["mag_disk"]
+                    for b in filter_names
+                })
+                metadata_dict.update({
+                    catalog_columns["radius_bulge"]: first_filter_params["hlr_bulge"],
+                    catalog_columns["radius_disk"]: first_filter_params["hlr_disk"],
+                    catalog_columns["bulge_axratio"]: first_filter_params["bulge_axratio"],
+                    catalog_columns["disk_axratio"]: first_filter_params["disk_axratio"],
+                    catalog_columns["angle_bd"]: first_filter_params["position_angle"],
+                })
+
+            metadata_rows.append(metadata_dict)
 
         except Exception as e:
             print(f"\nWarning: Failed galaxy {gr.get('id', '?')}: {e}")
@@ -261,6 +365,8 @@ class GalaxySim:
         max_fft_size=512,
         catalog_columns=None,
         snr_threshold=50,
+        galaxy_type="sersic",
+        disk_mag_threshold=50.0,
     ):
         """
         Initialize the simulator
@@ -284,6 +390,15 @@ class GalaxySim:
             (should include 'mag_cols' and 'snr' keys)
         snr_threshold : float, optional
             Minimum SNR threshold for filtering galaxies (default: 50)
+        galaxy_type : str, optional
+            Type of galaxy profile: 'sersic' or 'bulge+disk'
+            (default: 'sersic')
+        disk_mag_threshold : float, optional
+            For bulge+disk mode: clip disk magnitudes to this value.
+            If disk mag >= threshold, simulate bulge-only (no disk).
+            This parameter is required because of bulge COSMOS-Web has 999
+            as a sentinel value for no detection but for the disk component
+            there are extremely large values for non-detection.
         """
         self.catalog = catalog
         self.survey = get_survey(survey_name=survey_name)
@@ -293,6 +408,8 @@ class GalaxySim:
         self.max_fft_size = max_fft_size
         self.catalog_columns = catalog_columns
         self.snr_threshold = snr_threshold
+        self.galaxy_type = galaxy_type
+        self.disk_mag_threshold = disk_mag_threshold
         self.rng = galsim.BaseDeviate(random_seed or 12345)
         self.gsparams = galsim.GSParams(maximum_fft_size=max_fft_size)
 
@@ -355,8 +472,11 @@ class GalaxySim:
         Parameters:
         -----------
         galaxy_params_filter : dict
-            Galaxy parameters with keys: 'mag', 'hlr', 'sersic_n',
-            'sersic_ratio', 'sersic_angle'
+            Galaxy parameters. For 'sersic' type, required keys:
+            'mag', 'hlr', 'sersic_n', 'sersic_ratio', 'sersic_angle'.
+            For 'bulge+disk' type, required keys:
+            'mag_bulge', 'mag_disk', 'hlr_bulge', 'hlr_disk',
+            'bulge_axratio', 'disk_axratio', 'position_angle'
         psf_params_filter : dict
             PSF parameters with keys 'fwhm' (required) and 'beta' (for
             Moffat PSF)
@@ -381,13 +501,12 @@ class GalaxySim:
         filter = self.survey.get_filter(filter_name)
         sky_level = mean_sky_level(self.survey, filter).to_value("electron")
 
-        # Get galaxy flux
-        gal_flux = mag2counts(
-            galaxy_params_filter["mag"], survey=self.survey, filter=filter
-        )
-
         # Create galaxy profile
         if galaxy_type == "sersic":
+            # Get galaxy flux
+            gal_flux = mag2counts(
+                galaxy_params_filter["mag"], survey=self.survey, filter=filter
+            )
             galaxy = sim_single_band_sersic_galaxy(
                 flux=gal_flux.value,
                 hlr=galaxy_params_filter["hlr"],
@@ -397,7 +516,31 @@ class GalaxySim:
                 gsparams=gsparams,
             )
         elif galaxy_type == "bulge+disk":
-            raise ValueError("Not yet implemented")
+            # Get bulge flux from magnitude
+            bulge_flux = mag2counts(
+                galaxy_params_filter["mag_bulge"], survey=self.survey, filter=filter
+            )
+
+            # Check if disk magnitude is at/above threshold (no detectable disk)
+            # If so, simulate bulge-only by setting disk flux to zero
+            if galaxy_params_filter["mag_disk"] >= self.disk_mag_threshold:
+                disk_flux_value = 0.0
+            else:
+                disk_flux = mag2counts(
+                    galaxy_params_filter["mag_disk"], survey=self.survey, filter=filter
+                )
+                disk_flux_value = disk_flux.value
+
+            galaxy = sim_single_band_bulge_disk_galaxy(
+                flux_bulge=bulge_flux.value,
+                flux_disk=disk_flux_value,
+                hlr_bulge=galaxy_params_filter["hlr_bulge"],
+                hlr_disk=galaxy_params_filter["hlr_disk"],
+                bulge_axratio=galaxy_params_filter["bulge_axratio"],
+                disk_axratio=galaxy_params_filter["disk_axratio"],
+                position_angle=galaxy_params_filter["position_angle"],
+                gsparams=gsparams,
+            )
         else:
             raise ValueError(
                 f"galaxy_type should be either sersic or"
@@ -461,12 +604,20 @@ class GalaxySim:
             Dictionary with filter names as keys and galaxy parameters
             as values. Each filter's parameters must use standardized
             keys:
+            For 'sersic' profiles:
             - 'mag': magnitude in the band
-            For sersic profiles:
             - 'hlr': half-light radius in arcsec
             - 'sersic_n': Sersic index
             - 'sersic_ratio': axis ratio (b/a)
             - 'sersic_angle': position angle in degrees
+            For 'bulge+disk' profiles:
+            - 'mag_bulge': bulge magnitude in the band
+            - 'mag_disk': disk magnitude in the band
+            - 'hlr_bulge': bulge half-light radius in arcsec
+            - 'hlr_disk': disk half-light radius in arcsec
+            - 'bulge_axratio': bulge axis ratio (b/a)
+            - 'disk_axratio': disk axis ratio (b/a)
+            - 'position_angle': position angle in degrees
         psf_params_multiband : dict
             Dictionary with filter names as keys and PSF parameters as
             values. Each filter's parameters should contain 'fwhm'
@@ -539,7 +690,7 @@ class GalaxySim:
             multi_band_noiseless,
         )
 
-    def generate_image_from_row(self, galaxy_row, filter_names=None):
+    def generate_image_from_row(self, galaxy_row, filter_names=None, galaxy_type=None):
         """
         Generate multi-band images from a catalog row.
 
@@ -550,6 +701,9 @@ class GalaxySim:
         filter_names : list, optional
             List of filter names to simulate. If None, uses all
             available filters
+        galaxy_type : str, optional
+            Type of galaxy profile: 'sersic' or 'bulge+disk'.
+            If None, uses self.galaxy_type (default: None)
 
         Returns:
         --------
@@ -567,6 +721,9 @@ class GalaxySim:
         if filter_names is None:
             filter_names = self.survey.available_filters
 
+        if galaxy_type is None:
+            galaxy_type = self.galaxy_type
+
         galaxy_params_multi_band = {}
         psf_params_multi_band = {}
 
@@ -575,25 +732,67 @@ class GalaxySim:
 
             # Extract from catalog using catalog column names
             # but create dict with standardized parameter names
-            # Find the magnitude column that corresponds to this filter
-            mag_col = next(
-                col
-                for col in self.catalog_columns["mag_cols"]
-                if col.endswith(filter_name)
-            )
-            galaxy_params_multi_band[filter_name] = {
-                "mag": float(galaxy_row[mag_col]),
-                "hlr": float(galaxy_row[self.catalog_columns["hlr"]] * 3600),
-                "sersic_n": float(
-                    galaxy_row[self.catalog_columns["sersic_n"]]
-                ),
-                "sersic_ratio": float(
-                    galaxy_row[self.catalog_columns["sersic_ratio"]]
-                ),
-                "sersic_angle": float(
-                    galaxy_row[self.catalog_columns["sersic_angle"]]
-                ),
-            }
+            if galaxy_type == "sersic":
+                # Find the magnitude column that corresponds to this filter
+                mag_col = next(
+                    col
+                    for col in self.catalog_columns["mag_cols"]
+                    if col.endswith(filter_name)
+                )
+                galaxy_params_multi_band[filter_name] = {
+                    "mag": float(galaxy_row[mag_col]),
+                    "hlr": float(galaxy_row[self.catalog_columns["hlr"]] * 3600),
+                    "sersic_n": float(
+                        galaxy_row[self.catalog_columns["sersic_n"]]
+                    ),
+                    "sersic_ratio": float(
+                        galaxy_row[self.catalog_columns["sersic_ratio"]]
+                    ),
+                    "sersic_angle": float(
+                        galaxy_row[self.catalog_columns["sersic_angle"]]
+                    ),
+                }
+            elif galaxy_type == "bulge+disk":
+                # Find the bulge and disk magnitude columns for this filter
+                mag_bulge_col = next(
+                    col
+                    for col in self.catalog_columns["mag_bulge_cols"]
+                    if col.endswith(filter_name)
+                )
+                mag_disk_col = next(
+                    col
+                    for col in self.catalog_columns["mag_disk_cols"]
+                    if col.endswith(filter_name)
+                )
+                # Clip disk magnitude to threshold to handle sentinel values
+                # (e.g., 1e308 for galaxies with no detectable disk)
+                disk_mag_raw = float(galaxy_row[mag_disk_col])
+                disk_mag_clipped = min(disk_mag_raw, self.disk_mag_threshold)
+
+                galaxy_params_multi_band[filter_name] = {
+                    "mag_bulge": float(galaxy_row[mag_bulge_col]),
+                    "mag_disk": disk_mag_clipped,
+                    "hlr_bulge": float(
+                        galaxy_row[self.catalog_columns["radius_bulge"]] * 3600
+                    ),
+                    "hlr_disk": float(
+                        galaxy_row[self.catalog_columns["radius_disk"]] * 3600
+                    ),
+                    "bulge_axratio": float(
+                        galaxy_row[self.catalog_columns["bulge_axratio"]]
+                    ),
+                    "disk_axratio": float(
+                        galaxy_row[self.catalog_columns["disk_axratio"]]
+                    ),
+                    "position_angle": float(
+                        galaxy_row[self.catalog_columns["angle_bd"]]
+                    ),
+                }
+            else:
+                raise ValueError(
+                    f"galaxy_type should be either 'sersic' or "
+                    f"'bulge+disk', got {galaxy_type}"
+                )
 
             psf_params_multi_band[filter_name] = {
                 "fwhm": filter_obj.psf_fwhm.value,
@@ -607,6 +806,7 @@ class GalaxySim:
                 psf_params_multi_band,
                 psf_type="moffat",
                 add_noise="all",
+                galaxy_type=galaxy_type,
             )
         )
 
@@ -724,6 +924,7 @@ class GalaxySim:
             "image_size": self.image_size,
             "max_fft_size": self.max_fft_size,
             "catalog_columns": self.catalog_columns,
+            "galaxy_type": self.galaxy_type,
         }
 
         print(
